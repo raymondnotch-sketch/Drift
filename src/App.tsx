@@ -1,4 +1,3 @@
-import "../src-tauri/icons/react.svg";
 import "./App.css";
 
 function App() {
