@@ -1,13 +1,13 @@
 # Developer Guide
 
-This guide explains how freebuff is put together and why.
+This guide explains how drift is put together and why.
 
 It is written so that someone who did not write the original code can read it and
 understand the system.
 
 ## The big picture
 
-freebuff is a desktop app for transferring files between nearby devices over a
+drift is a desktop app for transferring files between nearby devices over a
 local network.
 
 The app is split into two main concerns:
@@ -192,28 +192,31 @@ The backend is the right place for this logic.
 
 ## Transfer lifecycle
 
-A typical transfer lifecycle looks like this:
+In V1, a transfer lifecycle looks like this:
 
 1. **Preparation**
    - sender chooses a file
-   - receiver is ready to accept
+   - receiver starts listening on a TCP port
 
 2. **Connection**
-   - the two sides establish communication
+   - sender connects to the receiver's address
 
 3. **Transfer**
-   - data is streamed from sender to receiver
-   - progress is reported
+   - sender streams the file in chunks
+   - receiver writes chunks to a temporary file
+   - sender reports progress
 
 4. **Completion**
-   - the receiver writes the final file
-   - integrity is verified
+   - receiver finishes writing the temporary file
+   - receiver computes the SHA-256 digest
+   - receiver verifies size and digest against the sender's values
+   - if verification succeeds, the receiver moves the file to its final location
 
 5. **Result**
    - the UI shows success or failure
 
-Not every detail of this lifecycle is fixed yet. The important point is that the
-lifecycle should be explicit and observable.
+The lifecycle is explicit on purpose. That makes the transfer observable and
+easier to debug.
 
 ## Error handling
 
@@ -239,17 +242,19 @@ Technical details can still be available through logs or diagnostics if needed.
 
 Integrity verification is a requirement, not a nice-to-have.
 
-The receiver should be able to confirm that the file it received matches the file
-the sender intended to send.
+In V1, the receiver confirms that the received file matches the source file using
+two checks:
 
-This may involve:
+- file size comparison
+- SHA-256 digest comparison
 
-- comparing file size
-- comparing a checksum or hash
-- or another verification mechanism chosen during implementation
+The sender computes the SHA-256 digest of the file it is sending. The receiver
+computes the SHA-256 digest of the file it received and compares it with the
+sender's digest.
 
-Integrity verification protects against silent corruption and makes the transfer
-trustworthy.
+This protects against silent corruption and makes the transfer trustworthy.
+
+Integrity verification is done in the Rust backend, not in the UI.
 
 ## State management
 

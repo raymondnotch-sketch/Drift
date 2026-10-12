@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "freebuff",
+  "productName": "Drift",
   "version": "0.1.0",
-  "identifier": "com.rich-guy.freebuff",
+  "identifier": "com.rich-guy.drift",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
@@ -12,9 +12,11 @@
   "app": {
     "windows": [
       {
-        "title": "freebuff",
+        "title": "Drift",
         "width": 800,
-        "height": 600
+        "height": 600,
+        "minWidth": 600,
+        "minHeight": 500
       }
     ],
     "security": {

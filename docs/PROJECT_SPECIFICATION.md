@@ -2,7 +2,7 @@
 
 ## Purpose
 
-freebuff is a desktop application for transferring files directly between nearby
+drift is a desktop application for transferring files directly between nearby
 devices over a local network.
 
 It is designed to work without requiring internet access for the core transfer

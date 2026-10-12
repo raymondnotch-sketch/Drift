@@ -13,20 +13,26 @@ Goal:
 Transfer a file successfully between two computers over a local network without
 requiring internet access.
 
-Planned V1 capabilities:
+V1 capabilities:
 
 - application startup
-- local-network communication
+- local-network communication over plain TCP
 - basic sender and receiver roles
 - file selection on the sender side
-- file transfer
+- file transfer with streaming
 - transfer progress
 - receiver-side file saving
 - basic error handling
-- basic file-integrity verification
+- basic file-integrity verification using SHA-256
 
-V1 is intentionally simple. It should not try to build every future feature at
-once.
+V1 does not yet include:
+
+- device discovery
+- session codes or QR pairing
+- encryption
+- resumable transfers
+- multiple simultaneous transfers
+- mobile support
 
 ## Version 2 — Improved user experience
 

@@ -2,7 +2,7 @@
 
 ## Security posture
 
-freebuff is being built with security in mind, but it does not yet provide a
+drift is being built with security in mind, but it does not yet provide a
 complete security story.
 
 This document describes the current assumptions, the intended direction, and what

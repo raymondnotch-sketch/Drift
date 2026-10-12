@@ -1,15 +1,15 @@
-# freebuff
+﻿# Drift
 
 Local, offline-first file transfer for nearby devices.
 
 ## What it is
 
-freebuff is a desktop application that lets you transfer files directly between
+Drift is a desktop application that lets you transfer files directly between
 nearby computers over a local network, without uploading them to the internet and
 without needing a large USB drive.
 
 The UI is built with React + TypeScript and Tailwind CSS. The desktop app is
-Tauri. The transfer/core logic will live in Rust.
+Tauri. The transfer/core logic lives in Rust.
 
 ## Why it exists
 
@@ -25,10 +25,9 @@ That practical problem is the reason this project exists.
 
 ## Offline-first
 
-The transfer path is meant to work on a local network even when there is no
-internet access.
+The transfer path works on a local network even when there is no internet access.
 
-Supported connection scenarios (conceptual, not all implemented yet):
+Supported connection scenarios:
 
 - Two devices on the same Wi-Fi network
 - One device creating a hotspot and the other connecting to it
@@ -39,65 +38,58 @@ functionality.
 
 ## Current status
 
-- **Version:** 0.1.0 (scaffold / initialization milestone)
-- **Primary goal right now:** a clean, buildable, launching application with the
-  approved tech stack and initial documentation in place.
+**Version 1.0 — Basic local transfer is now implemented**
 
 **What works now:**
 
-- Application scaffold builds and launches
-- React + TypeScript + Tailwind CSS frontend
+- Application builds and launches
+- React + TypeScript + Tailwind CSS frontend with functional UI
 - Tauri desktop shell
-- Rust backend crate compiles cleanly
-- Repository structure and initial documentation exist
+- Rust backend with complete V1 transfer engine
+- Receiver mode: listen for incoming file transfers on a TCP port
+- Sender mode: connect to a receiver and send a file
+- File streaming with chunked I/O (large files supported)
+- Transfer progress tracking
+- SHA-256 integrity verification
+- Cancellation support
+- Error handling with user-facing messages
+- Clean, functional UI for both sender and receiver roles
 
-**What is NOT implemented yet:**
+**Current V1 limitations:**
 
-- File transfer
-- Device connection / session logic
-- Local network discovery
-- Transfer progress, resume, encryption, mobile support, and similar features
+- No device discovery (manual IP address entry required)
+- No encryption or authentication
+- No resumable transfers
+- No multiple-file transfers
+- Single transfer at a time
+- No session codes or QR pairing
+- Desktop only (no mobile support yet)
 
-Those are planned for later versions.
+These limitations are expected for V1 and will be addressed in future versions.
 
 ## Technology stack
 
 - **Frontend:** React, TypeScript, Vite, Tailwind CSS
 - **Desktop shell:** Tauri
-- **Core/backend:** Rust
-- **Local persistence:** SQLite will be used where application metadata truly
-  needs to persist
+- **Core/backend:** Rust with Tokio async runtime
+- **Transfer protocol:** TCP with streaming and SHA-256 verification
 - **Version control:** Git
 
 ## Architecture (high level)
 
 The UI and the transfer engine are kept separate.
 
-Conceptually:
-
 ```
 React + TypeScript
-  -> Tauri
-    -> Rust application core
-      -> local network / filesystem
+  -> Tauri IPC
+    -> Rust transfer engine
+      -> TCP networking / filesystem
 ```
 
-The frontend is responsible for user interaction, file selection, status display,
-transfer progress, settings, and user-facing error messages.
-
-The Rust layer should own the real transfer engineering:
-
-- filesystem interaction
-- transfer management
-- networking
-- file streaming
-- integrity verification
-- transfer state
-- error handling
-- security-related concerns
-
-This separation matters because large-file transfer logic should not live in the
-frontend, and streaming/integrity work is much more natural in Rust.
+The frontend handles user interaction, file selection, status display, and
+transfer progress. The Rust layer owns the real transfer engineering: filesystem
+interaction, transfer management, networking, file streaming, integrity
+verification, transfer state, error handling, and security-related concerns.
 
 ## Project structure
 
@@ -106,7 +98,7 @@ Key directories:
 - `src/` — React frontend
 - `src-tauri/` — Tauri/Rust backend
 - `docs/` — project documentation
-- `test-data/` — optional place for test files used during development
+- `test-data/` — test files for development
 
 ## Documentation
 
@@ -142,30 +134,76 @@ npm install
 npm run tauri dev
 ```
 
+The application will launch with the Drift interface. Choose "Receive a file"
+or "Send a file" to start a transfer.
+
 ### Build for production
 
 ```bash
 npm run tauri build
 ```
 
-### Running tests
+### Using drift
 
-Right now the project does not have a large automated test suite. Early
-development is focused on build verification, launch verification, and manual
-testing of the actual transfer flow once it exists.
+**To receive a file:**
+
+1. Launch drift on the receiving computer
+2. Click "Receive a file"
+3. Choose a port (default 8765) and optionally a save directory
+4. Click "Start listening"
+5. Note your IP address (you'll need to provide this to the sender)
+6. The application will wait for an incoming connection
+
+**To send a file:**
+
+1. Launch drift on the sending computer
+2. Click "Send a file"
+3. Browse and select the file you want to send
+4. Enter the receiver's IP address (e.g., 192.168.1.100)
+5. Enter the port (must match the receiver's port, default 8765)
+6. Click "Send file"
+7. Watch the progress as the file transfers
+
+**Finding your IP address:**
+
+- Windows: Open Command Prompt and run `ipconfig`
+- Mac/Linux: Open Terminal and run `ifconfig` or `ip addr`
+- Look for your local network IP (usually starts with 192.168.x.x or 10.x.x.x)
+
+## Testing
+
+V1 testing is primarily manual:
+
+1. Launch two instances of drift (or run on two computers on the same network)
+2. Start a receiver on one instance
+3. Send a file from the other instance
+4. Verify the file transfers successfully
+5. Verify the integrity check passes
+6. Test cancellation
+7. Test error scenarios (wrong address, connection drop, etc.)
+
+Automated tests can be added in future versions.
 
 ## Roadmap
 
 Development is intended to be incremental.
 
-- **Version 1:** basic local file transfer between two devices
-- **Version 2:** better UX, multiple files, speed/time estimates, drag and drop
-- **Version 3:** device discovery and pairing
-- **Version 4:** resumable and more reliable transfers
-- **Version 5:** broader cross-platform/mobile reach where practical
-- **Version 6:** production readiness, stronger security, packaging, and release
+- **Version 1 (complete):** basic local file transfer with manual IP entry
+- **Version 2 (planned):** improved UX, multiple files, drag and drop, better progress
+- **Version 3 (planned):** device discovery and pairing
+- **Version 4 (planned):** resumable transfers and advanced reliability
+- **Version 5 (planned):** mobile and cross-platform expansion
+- **Version 6 (planned):** production readiness, encryption, packaging, release
 
 A detailed roadmap lives in `docs/ROADMAP.md`.
+
+## Known issues
+
+- V1 requires manual IP address entry (no device discovery yet)
+- V1 is not encrypted (security planned for V6)
+- V1 does not authenticate devices (planned for later versions)
+- Transfers are not resumable in V1 (planned for V4)
+- The receiver always saves to `received_file` (better naming planned for V2)
 
 ## Original problem
 
@@ -173,7 +211,16 @@ Two brothers, a large file, and no sufficiently large USB drive.
 
 That is the practical starting point for the whole project.
 
+## Contributing
+
+This project is currently in early development. Contributions, bug reports, and
+feature suggestions are welcome.
+
 ## License
 
 This project does not currently publish a chosen license. If you plan to use or
 distribute it, choose a license first and document it explicitly.
+
+---
+
+**V1 is complete. V2 planning will begin after initial real-world usage and feedback.**

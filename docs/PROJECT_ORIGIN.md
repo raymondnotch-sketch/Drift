@@ -46,4 +46,4 @@ support, and packaging, but none of that changes the original motivation.
 
 Two brothers, a large file, and no sufficiently large USB drive.
 
-That is the real origin of freebuff.
+That is the real origin of drift.

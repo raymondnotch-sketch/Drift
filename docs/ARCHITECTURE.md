@@ -2,7 +2,7 @@
 
 ## High-level shape
 
-freebuff is split into two main layers:
+drift is split into two main layers:
 
 1. **Frontend**
    - React

@@ -2,7 +2,7 @@
 
 ## Network model
 
-freebuff is built around local-network communication between two devices.
+drift is built around local-network communication between two devices.
 
 The two devices may be connected through different local-network arrangements,
 including:
@@ -26,16 +26,15 @@ The Rust backend owns the networking work. That includes:
 The UI should not implement its own transfer networking. It should ask the
 backend to connect or accept, and then show what the backend reports.
 
-## What the application does not own yet
+## What V1 implements
 
-The application is not initially responsible for creating the operating system's
-hotspot or otherwise managing the network itself.
+V1 implements a basic TCP transfer between two devices on the same reachable
+local network.
 
-Network creation and file transfer are separate concerns. The app focuses on
-communicating over a local network that already exists or that the user has set up.
+One device listens for an incoming connection. The other device connects to that
+listener and sends a file.
 
-Local device discovery, automatic peer detection, and similar features are future
-work, not current behavior.
+The Rust backend owns the connection, the streaming, and the file writing.
 
 ## Why streaming matters here
 
@@ -56,7 +55,12 @@ than it is. Planned security work is planned, not delivered.
 
 ## Current state
 
-Today, networking is planned and scaffolded, but the actual transfer protocol and
-connection flow are being implemented as V1 work.
+V1 implements a basic TCP sender and receiver with streaming and integrity
+verification.
 
-This document describes the intended model and constraints.
+Current limitations:
+
+- no encryption
+- no authentication of the peer
+- no automatic device discovery
+- sender still needs the receiver address for V1

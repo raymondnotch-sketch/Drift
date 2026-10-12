@@ -3,7 +3,7 @@
 ## Purpose of this document
 
 This document describes the intended communication model between a sender and a
-receiver in freebuff.
+receiver in drift.
 
 It is deliberately conceptual for now. The exact wire format and command set will
 be refined as V1 is implemented.
@@ -21,21 +21,20 @@ A transfer is between one sender and one receiver.
 
 The transfer flow is expected to look something like this:
 
-1. One device acts as the receiver and becomes reachable on the local network.
-2. The other device acts as the sender.
-3. The sender connects to the receiver.
-4. The sender streams the file to the receiver.
-5. The receiver writes the incoming data to disk.
-6. The receiver verifies the file matches the source.
-7. Both sides report success or failure to the user.
+1. One device starts a receiver and listens on a local TCP port.
+2. The other device starts a sender and connects to the receiver's address.
+3. The sender streams the chosen file to the receiver in chunks.
+4. The receiver writes incoming data to a temporary file as it arrives.
+5. When the transfer completes, the receiver verifies the file and moves it into
+   its final location.
+6. Both sides report success or failure to the user.
 
-Exact setup and connection details are implementation work, not a fixed public
-spec at this stage.
+For V1 this is intentionally simple. There is no encrypted channel, no device
+discovery, and no session code yet.
 
 ## Streaming
 
-The protocol should support streaming the file rather than loading it entirely
-into memory.
+The transfer streams the file rather than loading it entirely into memory.
 
 That means:
 
@@ -43,38 +42,37 @@ That means:
 - the receiver writes chunks as they arrive
 - memory usage stays bounded for large files
 
-This is important because large-file support is a core requirement, and an
-approximately 11 GB file is a meaningful practical target.
+Large-file support is a core requirement, so V1 is built around chunked I/O
+from the start. An approximately 11 GB file is a practical stress target, but
+it does not need to be transferred during every development step.
 
 ## File identity and verification
 
-A transferred file should be verifiable on the receiving side.
+V1 verifies a transferred file on the receiving side.
 
-At minimum, the receiver should be able to confirm that the file it received
-matches the file the sender intended to send.
+At minimum, the receiver checks that the received file matches the source file.
 
-Integrity verification may include things like:
+V1 integrity verification uses:
 
-- size comparison
-- checksum comparison
-- or another integrity mechanism chosen during implementation
+- file size comparison
+- a SHA-256 digest of the complete file compared between sender and receiver
 
-The exact mechanism is an implementation detail. The requirement is that the
-receiver not silently accept a wrong or corrupted file.
+The receiver should not silently accept a wrong or corrupted file.
 
 ## Transfer state
 
-Both sides should be able to describe what is happening:
+V1 models transfer state as:
 
-- waiting
+- idle
+- listening
 - connecting
-- transferring
-- finishing
-- succeeded
+- sending
+- receiving
+- finished
 - failed
 - cancelled
 
-The UI displays that state. The backend is responsible for producing it.
+The UI displays that state. The Rust backend is responsible for producing it.
 
 ## Error handling
 
@@ -94,18 +92,30 @@ obscure network error string.
 
 Future protocol work may add:
 
-- multi-file transfers
+- multiple-file transfers
 - resumable transfers
+- interrupted-transfer recovery
+- automatic retry
 - chunk-level integrity checks
-- retry behavior
-- session management
+- session codes or QR-based pairing
+- device discovery
 - stronger security
 
-Those are planned for later versions, not part of the current protocol spec.
+Those are planned for later versions, not part of V1.
 
 ## Current status
 
-The protocol is being shaped during V1 implementation.
+V1 implements a basic TCP listen/connect transfer with streaming and file
+integrity verification.
 
-This document describes the intended behavior and constraints, not a completed
-wire specification.
+Current limitations:
+
+- V1 is not encrypted
+- V1 does not authenticate the other device
+- V1 does not yet include device discovery
+- V1 does not yet include resumable transfers
+- V1 still expects the user to provide the receiver address when acting as a
+  sender
+
+This document describes the V1 transfer behavior, not a finalized future
+protocol.
