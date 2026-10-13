@@ -6,8 +6,11 @@
   "permissions": [
     "core:default",
     "opener:default",
+    "dialog:default",
     "fs:default",
     "fs:scope-appdata-recursive",
     "fs:scope-home-recursive"
   ]
 }
+
+

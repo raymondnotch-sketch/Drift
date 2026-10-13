@@ -140,6 +140,20 @@ async fn drift_state(app: AppHandle) -> Result<TransferState, String> {
     Ok(state)
 }
 
+#[tauri::command]
+async fn drift_reset(app: AppHandle) -> Result<TransferState, String> {
+    let control = app_transfer_control(&app).await?;
+    let mut state = control.manager.write().await;
+    match state.status.as_str() {
+        "listening" | "receiving" | "connecting" | "sending" => {
+            return Err("A transfer is still active. Cancel it first.".into());
+        }
+        _ => {}
+    }
+    *state = TransferState::default();
+    Ok(state.clone())
+}
+
 // ---------------------------------------------------------------------------
 // App entry point
 // ---------------------------------------------------------------------------
@@ -163,7 +177,8 @@ pub fn run() {
             drift_listen,
             drift_connect,
             drift_cancel,
-            drift_state
+            drift_state,
+            drift_reset,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

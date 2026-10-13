@@ -125,6 +125,58 @@ impl AppTransferControl {
 
 const CHUNK_BYTES: usize = 1_048_576; // 1 MB
 
+/// Keep only a safe file name: no folders, no characters Windows rejects.
+fn safe_file_name(raw: &str) -> String {
+    // Take only the last path component, whichever slash the sender used.
+    let last = raw.rsplit(|c| c == '/' || c == '\\').next().unwrap_or("");
+    let cleaned: String = last
+        .chars()
+        .map(|c| {
+            if c.is_control() || matches!(c, '<' | '>' | ':' | '"' | '|' | '?' | '*') {
+                '_'
+            } else {
+                c
+            }
+        })
+        .collect();
+    let cleaned = cleaned.trim().trim_end_matches('.').trim().to_string();
+    if cleaned.is_empty() || cleaned == "." || cleaned == ".." {
+        return "received_file".into();
+    }
+    // Windows reserved device names (CON, NUL, COM1, ...)
+    let stem = cleaned.split('.').next().unwrap_or("").to_ascii_uppercase();
+    let reserved = ["CON", "PRN", "AUX", "NUL"];
+    let is_com_lpt = (stem.starts_with("COM") || stem.starts_with("LPT"))
+        && stem.len() == 4
+        && stem.chars().last().map_or(false, |c| c.is_ascii_digit());
+    if reserved.contains(&stem.as_str()) || is_com_lpt {
+        return format!("_{}", cleaned);
+    }
+    cleaned
+}
+
+/// Never overwrite an existing file: add " (1)", " (2)", ... before the extension.
+fn unique_path(dir: &PathBuf, name: &str) -> PathBuf {
+    let candidate = dir.join(name);
+    if !candidate.exists() {
+        return candidate;
+    }
+    let p = std::path::Path::new(name);
+    let stem = p.file_stem().and_then(|s| s.to_str()).unwrap_or("received_file");
+    let ext = p.extension().and_then(|s| s.to_str());
+    for i in 1..10_000 {
+        let new_name = match ext {
+            Some(e) => format!("{} ({}).{}", stem, i, e),
+            None => format!("{} ({})", stem, i),
+        };
+        let path = dir.join(&new_name);
+        if !path.exists() {
+            return path;
+        }
+    }
+    candidate
+}
+
 pub async fn run_receiver(
     args: StartReceiverArgs,
     control: Arc<AppTransferControl>,
@@ -224,6 +276,10 @@ async fn handle_receiver_connection(
         .map_err(|_| "Receiver: failed to read digest-length header".to_string())?;
     let digest_len = u32::from_le_bytes(len_buf) as usize;
 
+        if digest_len == 0 || digest_len > 256 {
+        return Err("Receiver: invalid digest length".into());
+    }
+
     let mut digest_bytes = vec![0u8; digest_len];
     read_exact_or_cancel(&mut stream, &mut digest_bytes, &mut cancel_rx)
         .await
@@ -232,6 +288,20 @@ async fn handle_receiver_connection(
     // The sender sends the digest as base64 ASCII.
     let sender_digest =
         String::from_utf8(digest_bytes).map_err(|_| "Receiver: invalid digest encoding".to_string())?;
+
+            let mut name_len_buf = [0u8; 4];
+    read_exact_or_cancel(&mut stream, &mut name_len_buf, &mut cancel_rx)
+        .await
+        .map_err(|_| "Receiver: failed to read file-name length".to_string())?;
+    let name_len = u32::from_le_bytes(name_len_buf) as usize;
+    if name_len == 0 || name_len > 1024 {
+        return Err("Receiver: invalid file name length".into());
+    }
+    let mut name_bytes = vec![0u8; name_len];
+    read_exact_or_cancel(&mut stream, &mut name_bytes, &mut cancel_rx)
+        .await
+        .map_err(|_| "Receiver: failed to read file name".to_string())?;
+    let file_name = safe_file_name(&String::from_utf8_lossy(&name_bytes));
 
     // Sanity-check the reported size to avoid surprising disk usage.
     if file_size > 100_000_000_000_000 {
@@ -242,6 +312,7 @@ async fn handle_receiver_connection(
         let mut state = control.manager.write().await;
         state.kind = "receiver".into();
         state.status = "receiving".into();
+        state.file_name = Some(file_name.clone());
         state.file_size = Some(file_size);
         state.sender_digest = Some(sender_digest.clone());
         state.total_bytes = Some(file_size);
@@ -327,11 +398,7 @@ async fn handle_receiver_connection(
         return Err("Integrity check failed".into());
     }
 
-    let final_path = {
-        let dest_dir = PathBuf::from(&save_directory);
-        let file_name = "received_file";
-        dest_dir.join(file_name)
-    };
+        let final_path = unique_path(&PathBuf::from(&save_directory), &file_name);
 
     // Move temp file to final location.
     fs::rename(&tmp_path, &final_path).map_err(|e| {
@@ -383,18 +450,45 @@ pub async fn run_sender(
         .unwrap_or_else(|| "unknown".into());
 
     // Compute the digest up front so the receiver can verify.
-    let sender_digest = {
-        let mut file = File::open(&source).map_err(|e| format!("Could not open source file: {}", e))?;
+     {
+        let mut state = control.manager.write().await;
+        state.kind = "sender".into();
+        state.status = "preparing".into();
+        state.file_name = Some(file_name.clone());
+        state.file_size = Some(file_size);
+        state.total_bytes = Some(file_size);
+        state.error_message = None;
+        state.progress_bytes = 0;
+    }
+
+    let source_for_hash = source.clone();
+    let hash_task = tokio::task::spawn_blocking(move || -> Result<String, String> {
+        let mut file = File::open(&source_for_hash)
+            .map_err(|e| format!("Could not open source file: {}", e))?;
         let mut hasher = Sha256::new();
         let mut buf = vec![0u8; CHUNK_BYTES];
         loop {
-            let n = file.read(&mut buf).map_err(|e| format!("Could not read source file: {}", e))?;
+            let n = file
+                .read(&mut buf)
+                .map_err(|e| format!("Could not read source file: {}", e))?;
             if n == 0 {
                 break;
             }
             hasher.update(&buf[..n]);
         }
-        base64::engine::general_purpose::STANDARD.encode(hasher.finalize())
+        Ok(base64::engine::general_purpose::STANDARD.encode(hasher.finalize()))
+    });
+
+    let sender_digest = tokio::select! {
+        _ = cancel_rx.recv() => {
+            let mut state = control.manager.write().await;
+            state.status = "cancelled".into();
+            state.error_message = Some("Transfer cancelled".into());
+            return Ok(());
+        }
+        res = hash_task => {
+            res.map_err(|e| format!("Hashing task failed: {}", e))??
+        }
     };
 
     let addr = args
@@ -455,6 +549,16 @@ pub async fn run_sender(
         .write_all(digest_bytes)
         .await
         .map_err(|e| format!("Failed to send digest: {}", e))?;
+
+        let name_bytes = file_name.as_bytes();
+    stream
+        .write_all(&(name_bytes.len() as u32).to_le_bytes())
+        .await
+        .map_err(|e| format!("Failed to send file-name length: {}", e))?;
+    stream
+        .write_all(name_bytes)
+        .await
+        .map_err(|e| format!("Failed to send file name: {}", e))?;
 
     let mut sent: u64 = 0;
     loop {

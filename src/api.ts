@@ -28,3 +28,10 @@ export async function cancelTransfer(): Promise<TransferState> {
 export async function getTransferState(): Promise<TransferState> {
   return await invoke<TransferState>("drift_state");
 }
+
+/**
+ * Reset a finished, failed or cancelled transfer back to idle.
+ */
+export async function resetTransfer(): Promise<TransferState> {
+  return await invoke<TransferState>("drift_reset");
+}

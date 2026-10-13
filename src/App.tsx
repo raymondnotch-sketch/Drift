@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { homeDir } from "@tauri-apps/api/path";
 import { Upload, Download, CheckCircle } from "lucide-react";
@@ -7,6 +7,7 @@ import {
   sendFile,
   cancelTransfer,
   getTransferState,
+  resetTransfer,
 } from "./api";
 import type { TransferState } from "./types";
 import {
@@ -35,6 +36,10 @@ function App() {
   const [receiverPort, setReceiverPort] = useState<string>("7000");
   const [saveDirectory, setSaveDirectory] = useState<string>("");
 
+  // Speed state
+  const [speed, setSpeed] = useState(0);
+  const lastSample = useRef<{ bytes: number; time: number } | null>(null);
+
   // Poll transfer state (throttled to avoid too many UI updates)
   useEffect(() => {
     if (mode === "home") return;
@@ -49,6 +54,23 @@ function App() {
       try {
         const transferState = await getTransferState();
         setState(transferState);
+                const active =
+          transferState.status === "sending" || transferState.status === "receiving";
+        if (!active) {
+          lastSample.current = null;
+          setSpeed(0);
+        } else {
+          const t = Date.now();
+          const prev = lastSample.current;
+          if (!prev) {
+            lastSample.current = { bytes: transferState.progress_bytes, time: t };
+          } else if (t - prev.time >= 500) {
+            const bps =
+              ((transferState.progress_bytes - prev.bytes) / (t - prev.time)) * 1000;
+            setSpeed((old) => (old === 0 ? bps : old * 0.7 + bps * 0.3));
+            lastSample.current = { bytes: transferState.progress_bytes, time: t };
+          }
+        }
         lastUpdate = now;
       } catch (err) {
         console.error("Failed to get transfer state:", err);
@@ -166,11 +188,22 @@ function App() {
     }
   };
 
+  const handleTryAgain = async () => {
+  try {
+    await resetTransfer();
+  } catch (err) {
+    console.error("Reset failed:", err);
+  }
+  setState(null);
+  setError(null);
+};
+
   const handleBack = () => {
     const isActive =
       state &&
       (state.status === "listening" ||
         state.status === "receiving" ||
+        state.status === "preparing" ||
         state.status === "connecting" ||
         state.status === "sending");
 
@@ -189,12 +222,13 @@ function App() {
   };
 
   const resetToHome = () => {
-    setMode("home");
-    setState(null);
-    setError(null);
-    setSelectedFile(null);
-    setDestination("");
-  };
+  resetTransfer().catch(() => {});
+  setMode("home");
+  setState(null);
+  setError(null);
+  setSelectedFile(null);
+  setDestination("");
+};
 
   const getFileName = (path: string): string => {
     return path.split(/[/\\]/).pop() || path;
@@ -270,13 +304,15 @@ function App() {
 
   // Send screen
   if (mode === "send") {
-    const isActive =
+        const isActive =
       state &&
-      (state.status === "connecting" || state.status === "sending");
+      (state.status === "preparing" ||
+        state.status === "connecting" ||
+        state.status === "sending");
     const isFinished = state && state.status === "finished";
     const isFailed = state && state.status === "failed";
     const isCancelled = state && state.status === "cancelled";
-    const showSetup = !state;
+    const showSetup = !state || state.status === "idle";
     const showProgress = isActive;
     const showComplete = isFinished;
     const showError = isFailed || isCancelled;
@@ -355,10 +391,14 @@ function App() {
               <div className="space-y-4">
                 <div className="text-center pb-4 border-b border-slate-100 dark:border-slate-700">
                   <h2 className="text-2xl font-semibold text-slate-900 dark:text-white mb-1">
-                    {state.status === "connecting" ? "Connecting..." : "Sending files..."}
+                    {state.status === "preparing"
+                    ? "Preparing file..."
+                    : state.status === "connecting"
+                    ? "Connecting..."
+                    : "Sending files..."}
                   </h2>
                   {state.file_name && (
-                    <p className="text-slate-600 dark:text-slate-400">{state.file_name}</p>
+                    <p className="text-slate-600 dark:text-slate-400 break-all">{state.file_name}</p>
                   )}
                 </div>
 
@@ -377,7 +417,16 @@ function App() {
                       </span>
                     </div>
                     <div className="text-sm text-slate-600 dark:text-slate-400">
-                      <div>Status: {state.status}</div>
+                                            {speed > 0 && state.total_bytes && (
+                        <div>
+                          {formatBytes(speed)}/s · about{" "}
+                          {Math.max(
+                            1,
+                            Math.round((state.total_bytes - state.progress_bytes) / speed)
+                          )}
+                          s left
+                        </div>
+                      )}
                     </div>
                   </>
                 )}
@@ -399,7 +448,7 @@ function App() {
                   <h2 className="text-2xl font-semibold text-slate-900 dark:text-white mb-2">
                     Transfer complete
                   </h2>
-                  <p className="text-slate-600 dark:text-slate-400">
+                  <p className="text-slate-600 dark:text-slate-400 break-all">
                     {state.file_name && state.file_size && (
                       <>{state.file_name} · {formatBytes(state.file_size)} transferred successfully.</>
                     )}
@@ -431,7 +480,7 @@ function App() {
                   <Button variant="secondary" onClick={resetToHome} className="flex-1">
                     Back to home
                   </Button>
-                  <Button variant="primary" onClick={() => setState(null)} className="flex-1">
+                  <Button variant="primary" onClick={handleTryAgain} className="flex-1">
                     Try again
                   </Button>
                 </div>
@@ -449,7 +498,7 @@ function App() {
     const isFinished = state && state.status === "finished";
     const isFailed = state && state.status === "failed";
     const isCancelled = state && state.status === "cancelled";
-    const showSetup = !state;
+    const showSetup = !state || state.status === "idle";
     const showWaiting = state && state.status === "listening";
     const showProgress = state && state.status === "receiving";
     const showComplete = isFinished;
@@ -557,7 +606,7 @@ function App() {
                     Receiving files...
                   </h2>
                   {state.file_name && (
-                    <p className="text-slate-600 dark:text-slate-400">{state.file_name}</p>
+                    <p className="text-slate-600 dark:text-slate-400 break-all">{state.file_name}</p>
                   )}
                 </div>
 
@@ -576,7 +625,16 @@ function App() {
                       </span>
                     </div>
                     <div className="text-sm text-slate-600 dark:text-slate-400">
-                      <div>Status: {state.status}</div>
+                                            {speed > 0 && state.total_bytes && (
+                        <div>
+                          {formatBytes(speed)}/s · about{" "}
+                          {Math.max(
+                            1,
+                            Math.round((state.total_bytes - state.progress_bytes) / speed)
+                          )}
+                          s left
+                        </div>
+                      )}
                     </div>
                   </>
                 )}
@@ -598,7 +656,7 @@ function App() {
                   <h2 className="text-2xl font-semibold text-slate-900 dark:text-white mb-2">
                     Transfer complete
                   </h2>
-                  <p className="text-slate-600 dark:text-slate-400">
+                  <p className="text-slate-600 dark:text-slate-400 break_all">
                     {state.file_name && state.file_size && (
                       <>{state.file_name} · {formatBytes(state.file_size)} transferred successfully.</>
                     )}
@@ -635,7 +693,7 @@ function App() {
                   <Button variant="secondary" onClick={resetToHome} className="flex-1">
                     Back to home
                   </Button>
-                  <Button variant="primary" onClick={() => setState(null)} className="flex-1">
+                  <Button variant="primary" onClick={handleTryAgain} className="flex-1">
                     Try again
                   </Button>
                 </div>
