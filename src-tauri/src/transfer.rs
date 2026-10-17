@@ -387,6 +387,7 @@ async fn handle_receiver_connection(
 
     if !received_digest_b64.eq_ignore_ascii_case(&sender_digest) {
         let _ = fs::remove_file(&tmp_path);
+        let _ = fs::remove_file(&tmp_path);
         {
             let mut state = control.manager.write().await;
             state.status = "failed".into();
@@ -401,13 +402,14 @@ async fn handle_receiver_connection(
         let final_path = unique_path(&PathBuf::from(&save_directory), &file_name);
 
     // Move temp file to final location.
-    fs::rename(&tmp_path, &final_path).map_err(|e| {
-        format!(
+        if let Err(e) = fs::rename(&tmp_path, &final_path) {
+        let _ = stream.write_all(&[0u8]).await;
+        return Err(format!(
             "Receiver: could not finalize file {}: {}",
             final_path.display(),
             e
-        )
-    })?;
+        ));
+    }
 
     {
         let mut state = control.manager.write().await;
@@ -415,7 +417,9 @@ async fn handle_receiver_connection(
         state.received_file_path = Some(final_path.to_string_lossy().to_string());
         state.progress_bytes = file_size;
     }
-
+    // Tell the sender the file arrived intact and was saved.
+    let _ = stream.write_all(&[1u8]).await;
+    let _ = stream.flush().await;
     Ok(())
 }
 
@@ -593,6 +597,7 @@ pub async fn run_sender(
         }
     }
 
+        // Close our sending side so the receiver knows no more data is coming.
     stream
         .shutdown()
         .await
@@ -600,11 +605,35 @@ pub async fn run_sender(
 
     {
         let mut state = control.manager.write().await;
-        state.status = "finished".into();
         state.progress_bytes = file_size;
     }
 
-    Ok(())
+    // Wait for the receiver's verdict: 1 = verified and saved, 0 = failed.
+    let mut reply = [0u8; 1];
+    let verdict = tokio::select! {
+        _ = cancel_rx.recv() => {
+            let mut state = control.manager.write().await;
+            state.status = "cancelled".into();
+            state.error_message = Some("Transfer cancelled".into());
+            return Ok(());
+        }
+        r = tokio::time::timeout(
+            std::time::Duration::from_secs(120),
+            stream.read_exact(&mut reply),
+        ) => r,
+    };
+
+    match verdict {
+        Ok(Ok(_)) if reply[0] == 1 => {
+            let mut state = control.manager.write().await;
+            state.status = "finished".into();
+            state.progress_bytes = file_size;
+            Ok(())
+        }
+        Ok(Ok(_)) => Err("The other device reported that the file did not arrive intact.".into()),
+        Ok(Err(_)) => Err("The other device closed the connection before confirming the file arrived.".into()),
+        Err(_) => Err("Timed out waiting for the other device to confirm the file.".into()),
+    }
 }
 
 // ---------------------------------------------------------------------------
